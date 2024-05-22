@@ -21,7 +21,10 @@ class HarlowEnv(gym.Env):
         Construct an environment.
         """
 
+        # max number of trials per episode
         self.num_max = 20
+
+        # flip probability
         self.flip_prob = flip_prob
 
         self.action_space = Discrete(3)
@@ -33,13 +36,17 @@ class HarlowEnv(gym.Env):
         Reset the environment.
         """
 
+        # reset the environment
         self.num_completed = 0
         self.stage = 'fixation'
         self.correct_answer = np.random.randint(0, 2)
 
         obs = np.array([1.])
+        info = {
+            'correct_answer': self.correct_answer,
+        }
 
-        return obs, {}
+        return obs, info
     
 
     def step(self, action):
@@ -49,16 +56,21 @@ class HarlowEnv(gym.Env):
 
         done = False
 
+        # fixation stage
         if self.stage == 'fixation':
             self.stage = 'decision'
 
-            if action == 2: # fixation action
+            # fixation action
+            if action == 2:
                 reward = 0.
+            
+            # decision action
             else:
                 reward = -1.
             
             obs = np.array([0.])
         
+        # decision stage
         elif self.stage == 'decision':
             self.stage = 'fixation'
             self.num_completed += 1
@@ -73,8 +85,12 @@ class HarlowEnv(gym.Env):
         
         if self.num_completed >= self.num_max:
             done = True
+        
+        info = {
+            'correct_answer': self.correct_answer,
+        }
 
-        return obs, reward, done, False, {}
+        return obs, reward, done, False, info
     
 
     def flip_bandit(self):
@@ -185,25 +201,31 @@ if __name__ == '__main__':
     env = MetaLearningWrapper(env)
     
 
-    model = RecurrentPPO(
-        policy = 'MlpLstmPolicy',
-        env = env,
-        verbose = 1,
-        learning_rate = 1e-4,
-        n_steps = 20,
-        gamma = 0.9,
-        ent_coef = 0.05,
-    )
+    # model = RecurrentPPO(
+    #     policy = 'MlpLstmPolicy',
+    #     env = env,
+    #     verbose = 1,
+    #     learning_rate = 1e-4,
+    #     n_steps = 20,
+    #     gamma = 0.9,
+    #     ent_coef = 0.05,
+    # )
 
-    model.learn(total_timesteps = 1000000)
+    # model.learn(total_timesteps = 1000000)
 
-    # for i in range(50):
+    for i in range(50):
 
-    #     obs, _ = env.reset()
-    #     print('initial obs:', obs)
-    #     done = False
+        obs, info = env.reset()
+        print('initial obs:', obs)
+        done = False
         
-    #     while not done:
-    #         action = env.action_space.sample()
-    #         obs, reward, done, _, _ = env.step(action)
-    #         print('obs:', obs, 'action', action,   'correct answer:', env.correct_answer, 'reward:', reward, 'done:', done)
+        while not done:
+            action = env.action_space.sample()
+            obs, reward, done, truncated, info = env.step(action)
+            print(
+                'obs:', obs, '|',
+                'action:', action, '|',
+                'correct answer:', info['correct_answer'], '|',
+                'reward:', reward, '|',
+                'done:', done, '|',
+            )
