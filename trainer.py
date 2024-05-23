@@ -8,6 +8,8 @@ from torch import nn
 import torch.nn.functional as F
 from torch.distributions import Categorical
 
+from replaybuffer import *
+
 
 class A2C:
     """
@@ -43,19 +45,23 @@ class A2C:
         self.optimizer = torch.optim.Adam(net.parameters(), lr = self.lr)
     
 
-    def update_model(self, rewards, values, log_probs, entropies):
+    def update_model(self, buffer):
         """
         Update model parameters.
 
         Args:
-            rewards: a torch.Tensor with shape (seq_len,).
-            values: a torch.Tensor with shape (seq_len + 1,).
-            log_probs: a torch.Tensor with shape (seq_len,).
-            entropies: a torch.Tensor with shape (seq_len,).
+            buffer: a ReplayBuffer object. rollout includes:
+                rewards: a torch.Tensor with shape (seq_len,).
+                values: a torch.Tensor with shape (seq_len + 1,).
+                log_probs: a torch.Tensor with shape (seq_len,).
+                entropies: a torch.Tensor with shape (seq_len,).
 
         Returns:
             losses_episode: a dictionary. losses for the episode.
         """
+
+        # pull data from buffer
+        rewards, values, log_probs, entropies = buffer.pull('rewards', 'values', 'log_probs', 'entropies')
 
         # compute returns and advantages
         returns, advantages = self.get_discounted_returns(rewards, values)  # (seq_len,)
@@ -98,12 +104,8 @@ class A2C:
             data_episode: a dictionary. training data for the episode.
         """
 
-        # initialize recordins
-        actions = []
-        values = []
-        log_probs = []
-        entropies = []
-        rewards = []
+        # initialize replay buffer
+        buffer = ReplayBuffer()
                 
         # initialize a trial
         done = False
@@ -111,7 +113,7 @@ class A2C:
 
         # reset environment
         obs, info = self.env.reset()
-        obs = torch.Tensor(obs).unsqueeze(dim = 0) # add batch dimension
+        obs = torch.Tensor(obs).unsqueeze(dim = 0) # (1, feature_dim)
 
         # iterate through a trial
         while not done:
@@ -122,33 +124,31 @@ class A2C:
 
             # step the env
             obs, reward, done, truncated, info = self.env.step(action.item())
-            obs = torch.Tensor(obs).unsqueeze(dim = 0)
+            obs = torch.Tensor(obs).unsqueeze(dim = 0) # (1, feature_dim)
 
-            # record results
-            actions.append(action.item())
-            values.append(value.view(-1))
-            log_probs.append(log_prob)
-            entropies.append(entropy)
-            rewards.append(reward)
+            # push results
+            buffer.push(
+                values = value.view(-1),
+                log_probs = log_prob,
+                entropies = entropy,
+                rewards = reward
+            )
 
         # process the last timestep
         action, policy, log_prob, entropy, value, states_lstm = self.net(
             obs, states_lstm
         )
-        values.append(value.view(-1)) # values have one more step
+        buffer.push(values = value.view(-1)) # push value for the last time step
 
-        # concatenate recordings
-        values = torch.cat(values)
-        log_probs = torch.cat(log_probs)
-        entropies = torch.cat(entropies)
-        rewards = torch.Tensor(rewards)
+        # reformat rollout data
+        buffer.reformat()
 
         # update model
-        losses_episode = self.update_model(rewards, values, log_probs, entropies)
+        losses_episode = self.update_model(buffer)
 
         # compute reward and length of an epiosde
-        episode_reward = rewards.sum()
-        episode_length = len(rewards)
+        episode_reward = buffer.rollout['rewards'].sum()
+        episode_length = buffer.get_len()
 
         # wrap training data for the episode
         data_episode = losses_episode.copy()
@@ -185,7 +185,7 @@ class A2C:
         # train the model
         start_time = time.time()
         for episode in range(num_episodes):
-            # train the model for one episode
+            # train one episode
             data_episode = self.train_one_episode()
         
             # record training data
@@ -322,14 +322,6 @@ if __name__ == '__main__':
         policy_hidden_dim = 32,
         value_hidden_dim = 32,
     )
-
-    # net = SharedRecurrentActorCriticPolicy(
-    #     feature_dim = env.observation_space.shape[0],
-    #     action_dim = env.action_space.n,
-    #     lstm_hidden_dim = 128,
-    #     policy_hidden_dim = 32,
-    #     value_hidden_dim = 32,
-    # )
 
     a2c = A2C(
         net = net,

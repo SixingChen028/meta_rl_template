@@ -22,7 +22,7 @@ class HarlowEnv(gym.Env):
         """
 
         # max number of trials per episode
-        self.num_max = 20
+        self.num_trials = 20
 
         # flip probability
         self.flip_prob = flip_prob
@@ -83,7 +83,7 @@ class HarlowEnv(gym.Env):
             
             obs = np.array([1.])
         
-        if self.num_completed >= self.num_max:
+        if self.num_completed >= self.num_trials + np.random.randint(0, 10, 1): # test for different episode length
             done = True
         
         info = {
