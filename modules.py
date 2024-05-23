@@ -132,9 +132,9 @@ class RecurrentActorCriticPolicy(nn.Module):
         # network parameters
         self.feature_dim = feature_dim
         self.action_dim = action_dim
+        self.lstm_hidden_dim = lstm_hidden_dim
         self.policy_hidden_dim = policy_hidden_dim
         self.value_hidden_dim = value_hidden_dim
-        self.lstm_hidden_dim = lstm_hidden_dim
 
         # input feature extractor
         self.features_extractor = FlattenExtractor()
