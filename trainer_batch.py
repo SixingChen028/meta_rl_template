@@ -51,13 +51,13 @@ class BatchMaskA2C:
         Update model parameters.
 
         Args:
-        buffer: a ReplayBuffer object. rollout include:
-            masks: a torch.Tensor with shape (batch_size, seq_len).
-                1 for ongoing time steps and 0 for padding time steps.
-            rewards: a torch.Tensor with shape (batch_size, seq_len).
-            values: a torch.Tensor with shape (batch_size, seq_len + 1).
-            log_probs: a torch.Tensor with shape (batch_size, seq_len).
-            entropies: a torch.Tensor with shape (batch_size, seq_len).
+            buffer: a ReplayBuffer object. rollout include:
+                masks: a torch.Tensor with shape (batch_size, seq_len).
+                    1 for ongoing time steps and 0 for padding time steps.
+                rewards: a torch.Tensor with shape (batch_size, seq_len).
+                values: a torch.Tensor with shape (batch_size, seq_len + 1).
+                log_probs: a torch.Tensor with shape (batch_size, seq_len).
+                entropies: a torch.Tensor with shape (batch_size, seq_len).
 
         Returns:
             losses_episode: a dictionary. losses for the episode.
@@ -125,18 +125,19 @@ class BatchMaskA2C:
             action, policy, log_prob, entropy, value, states_lstm = self.net(
                 obs, states_lstm
             )
+            value = value.view(-1) # (batch_size,)
 
             # step the env
             obs, reward, done, truncated, info = self.env.step(action)
             obs = torch.Tensor(obs) # (batch_size, feature_dim)
             reward = torch.Tensor(reward) # (batch_size,)
 
-            # push results
+            # push results (make sure shapes are (batch_size,))
             buffer.push(
                 masks = mask,
-                values = value.view(-1),
                 log_probs = log_prob,
                 entropies = entropy,
+                values = value,
                 rewards = reward
             )
 
@@ -148,9 +149,10 @@ class BatchMaskA2C:
         action, policy, log_prob, entropy, value, states_lstm = self.net(
             obs, states_lstm
         )
-        buffer.push(values = value.view(-1)) # push value for the last time step
+        value = value.view(-1) # (batch_size,)
+        buffer.push(values = value) # push value for the last time step
 
-        # reformat rollout data
+        # reformat rollout data into (batch_size, seq_len)
         buffer.reformat()
 
         # update model
@@ -158,7 +160,7 @@ class BatchMaskA2C:
 
         # compute reward and length of the epiosde
         episode_reward = (buffer.rollout['rewards'] * buffer.rollout['masks']).sum(axis = 1).mean(axis = 0)
-        episode_length = buffer.get_len()
+        episode_length = buffer.rollout['masks'].sum(axis = 1).mean(axis = 0)
 
         # wrap training data for the episode
         data_episode = losses_episode.copy()
@@ -306,7 +308,7 @@ class BatchMaskA2C:
         if ep_num % print_frequency == 0:
             print("-------------------------------------------")
             print("| rollout/                |               |")
-            print(f"|    ep_len_mean          | {data['episode_length']:<13} |")
+            print(f"|    ep_len_mean          | {data['episode_length']:<13.1f} |")
             print(f"|    ep_rew_mean          | {data['episode_reward']:<13.5f} |")
             print("| time/                   |               |")
             print(f"|    ep_num               | {ep_num:<13} |")
@@ -356,7 +358,7 @@ if __name__ == '__main__':
         max_grad_norm = 1.,
     )
 
-    data = a2c.learn(num_episodes = 2000)
+    data = a2c.learn(num_episodes = 10000)
 
     plt.figure()
     plt.plot(np.array(data['episode_reward']).reshape(200, -1).mean(axis = 1))

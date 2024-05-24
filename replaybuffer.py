@@ -44,14 +44,6 @@ class BaseReplayBuffer:
         Reformat rollout data.
         """
         pass
-    
-
-    def get_len(self):
-        """
-        Get the length of the rollout.
-        """
-        pass
-
 
 
 class ReplayBuffer(BaseReplayBuffer):
@@ -86,14 +78,6 @@ class ReplayBuffer(BaseReplayBuffer):
         self.rollout['entropies'] = torch.cat(self.rollout['entropies']) # (T,)
         self.rollout['values'] = torch.cat(self.rollout['values']) # (T + 1,)
         self.rollout['rewards'] = torch.Tensor(self.rollout['rewards']) # (T,)
-    
-
-    def get_len(self):
-        """
-        Get the length of the rollout.
-        """
-        return len(self.rollout['rewards'])
-
 
 
 class BatchReplayBuffer(BaseReplayBuffer):
@@ -130,13 +114,6 @@ class BatchReplayBuffer(BaseReplayBuffer):
         self.rollout['entropies'] = torch.stack(self.rollout['entropies'], dim = 1) # (batch_size, seq_len)
         self.rollout['values'] = torch.stack(self.rollout['values'], dim = 1) # (batch_size, seq_len + 1)
         self.rollout['rewards'] = torch.stack(self.rollout['rewards'], dim = 1) # (batch_size, seq_len)
-    
-
-    def get_len(self):
-        """
-        Get the length of the rollout.
-        """
-        return self.rollout['rewards'].shape[1]
 
 
 
