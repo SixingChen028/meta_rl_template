@@ -136,10 +136,7 @@ class A2C:
             )
 
         # process the last timestep
-        action, policy, log_prob, entropy, value, states_lstm = self.net(
-            obs, states_lstm
-        )
-        value = value.view(-1) # (1,)
+        value = torch.zeros((1,)) # zero padding for the last time step
         buffer.push(values = value) # push value for the last time step
 
         # reformat rollout data into (seq_len,)
@@ -231,7 +228,7 @@ class A2C:
         advantages = torch.zeros_like(rewards)
 
         # compute returns and advantages from the last timestep
-        R = values[-1]
+        R = values[-1] # should be 0
         advantage = 0
         
         for i in reversed(range(len(rewards))):
@@ -242,13 +239,11 @@ class A2C:
 
             # compute return for the timestep
             R = r + R * self.gamma
+            returns[i] = R
 
             # compute advantage for the timestep
             delta = r + v_next * self.gamma - v
-            advantage = advantage * self.gamma + delta
-
-            # record return and advantage
-            returns[i] = R
+            advantage = delta + advantage * self.gamma
             advantages[i] = advantage
             
         return returns, advantages
@@ -330,13 +325,17 @@ if __name__ == '__main__':
         env = env,
         lr = 3e-4,
         gamma = 0.9,
-        beta_v = 0.5,
+        beta_v = 0.05,
         beta_e = 0.05,
         max_grad_norm = 1.,
     )
 
-    data = a2c.learn(num_episodes = 10000)
+    data = a2c.learn(num_episodes = 30000)
 
     plt.figure()
     plt.plot(np.array(data['episode_reward']).reshape(200, -1).mean(axis = 1))
+    plt.show()
+
+    plt.figure()
+    plt.plot(np.array(data['value_loss']).reshape(200, -1).mean(axis = 1))
     plt.show()

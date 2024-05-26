@@ -53,7 +53,7 @@ class BatchMaskA2C:
         Args:
             buffer: a ReplayBuffer object. rollout include:
                 masks: a torch.Tensor with shape (batch_size, seq_len).
-                    1 for ongoing time steps and 0 for padding time steps.
+                    track ongoing batches. 1 for ongoing time steps and 0 for padding time steps.
                 rewards: a torch.Tensor with shape (batch_size, seq_len).
                 values: a torch.Tensor with shape (batch_size, seq_len + 1).
                 log_probs: a torch.Tensor with shape (batch_size, seq_len).
@@ -67,7 +67,7 @@ class BatchMaskA2C:
         masks, rewards, values, log_probs, entropies = buffer.pull('masks', 'rewards', 'values', 'log_probs', 'entropies')
 
         # compute returns and advantages
-        returns, advantages = self.get_discounted_returns(rewards, values, masks) # (batch_size, seq_len)
+        returns, advantages = self.get_discounted_returns(rewards, values) # (batch_size, seq_len)
 
         # compute policy loss
         policy_loss = -(log_probs * advantages.detach() * masks).sum(axis = 1).mean(axis = 0) # (1,)
@@ -111,7 +111,7 @@ class BatchMaskA2C:
         buffer = BatchReplayBuffer()
                
         # initialize a trial
-        dones = np.zeros(self.batch_size, dtype = bool) # no reset to 0 ones turned to 1
+        dones = np.zeros(self.batch_size, dtype = bool) # no reset ones turned to 1
         mask = torch.ones(self.batch_size)
         states_lstm = None
 
@@ -138,21 +138,19 @@ class BatchMaskA2C:
                 log_probs = log_prob,
                 entropies = entropy,
                 values = value,
-                rewards = reward
+                rewards = reward,
             )
 
             # update mask and dones
-            mask = torch.Tensor(1 - dones) # keep 0 once a batch is done
+            # note: the order of the following two lines is crucial
             dones = np.logical_or(dones, done)
+            mask = torch.Tensor(1 - dones) # keep 0 once a batch is done
 
         # process the last timestep
-        action, policy, log_prob, entropy, value, states_lstm = self.net(
-            obs, states_lstm
-        )
-        value = value.view(-1) # (batch_size,)
+        value = torch.zeros((self.batch_size,)) # zero padding for the last time step
         buffer.push(values = value) # push value for the last time step
 
-        # reformat rollout data into (batch_size, seq_len)
+        # reformat rollout data into (batch_size, seq_len) and mask finished time steps
         buffer.reformat()
 
         # update model
@@ -223,15 +221,14 @@ class BatchMaskA2C:
         return data
     
 
-    def get_discounted_returns(self, rewards, values, masks):
+    def get_discounted_returns(self, rewards, values):
         """
         Compute discounted reterns and advantages.
 
         Args:
             rewards: a torch.Tensor with shape (batch_size, seq_len).
             values: a torch.Tensor with shape (batch_size, seq_len + 1).
-            masks: a torch.Tensor with shape (batch_size, seq_len).
-                1 for ongoing time steps and 0 for padding time steps.
+                note: finished time steps in rewards and values are already masked.
 
         Returns:
             returns: a torch.Tensor with shape (batch_size, seq_len).
@@ -246,6 +243,7 @@ class BatchMaskA2C:
         advantages = torch.zeros_like(rewards)
 
         # compute returns and advantages from the last timestep
+        # note: final R should always be 0, either by masking or zero padding
         R = values[:, -1]
         advantage = torch.zeros(self.batch_size)
         
@@ -254,18 +252,14 @@ class BatchMaskA2C:
             r = rewards[:, i]
             v = values[:, i]
             v_next = values[:, i + 1]
-            mask = masks[:, i] # mask for time step i + 1
 
             # compute return for the timestep
-            # note: R could contain irrelavent rewards (r) after a batch ends
-            R = r + R * self.gamma * mask
+            R = r + R * self.gamma
+            returns[:, i] = R
 
             # compute advantage for the timestep
-            delta = r + v_next * self.gamma * mask - v
-            advantage = advantage * self.gamma * mask + delta
-
-            # record return and advantage
-            returns[:, i] = R
+            delta = r + v_next * self.gamma - v
+            advantage = delta + advantage * self.gamma
             advantages[:, i] = advantage
             
         return returns, advantages
