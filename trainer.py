@@ -22,6 +22,7 @@ class A2C:
             env,
             lr,
             gamma,
+            lamda,
             beta_v,
             beta_e,
             lr_schedule = None,
@@ -36,6 +37,7 @@ class A2C:
         self.env = env
         self.lr = lr
         self.gamma = gamma
+        self.lamda = lamda
         self.beta_v = beta_v
         self.beta_e = beta_e
         self.lr_schedule = lr_schedule
@@ -243,7 +245,7 @@ class A2C:
 
             # compute advantage for the timestep
             delta = r + v_next * self.gamma - v
-            advantage = delta + advantage * self.gamma
+            advantage = delta + advantage * self.gamma * self.lamda
             advantages[i] = advantage
             
         return returns, advantages
@@ -325,12 +327,13 @@ if __name__ == '__main__':
         env = env,
         lr = 3e-4,
         gamma = 0.9,
+        lamda = 1.,
         beta_v = 0.05,
         beta_e = 0.05,
         max_grad_norm = 1.,
     )
 
-    data = a2c.learn(num_episodes = 30000)
+    data = a2c.learn(num_episodes = 10000)
 
     plt.figure()
     plt.plot(np.array(data['episode_reward']).reshape(200, -1).mean(axis = 1))
