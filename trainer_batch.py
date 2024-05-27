@@ -33,7 +33,9 @@ class BatchMaskA2C:
         Initialize the trainer.
         """
 
-        self.net = net
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+        self.net = net.to(self.device)
         self.env = env
         self.lr = lr
         self.batch_size = batch_size
@@ -68,6 +70,13 @@ class BatchMaskA2C:
         # pull data from buffer
         masks, rewards, values, log_probs, entropies = buffer.pull('masks', 'rewards', 'values', 'log_probs', 'entropies')
 
+        # move data to device
+        masks = masks.to(self.device)
+        rewards = rewards.to(self.device)
+        values = values.to(self.device)
+        log_probs = log_probs.to(self.device)
+        entropies = entropies.to(self.device)
+
         # compute returns and advantages
         returns, advantages = self.get_discounted_returns(rewards, values) # (batch_size, seq_len)
 
@@ -81,7 +90,11 @@ class BatchMaskA2C:
         entropy_loss = -(entropies * masks).sum(axis = 1).mean(axis = 0) # (1,)
 
         # compute loss
-        loss = policy_loss + self.beta_v * value_loss + self.beta_e * entropy_loss
+        loss = (
+            policy_loss +
+            self.beta_v * value_loss +
+            self.beta_e * entropy_loss
+        )
 
         # backpropagation
         self.optimizer.zero_grad()
@@ -114,12 +127,12 @@ class BatchMaskA2C:
                
         # initialize a trial
         dones = np.zeros(self.batch_size, dtype = bool) # no reset once turned to 1
-        mask = torch.ones(self.batch_size)
+        mask = torch.ones(self.batch_size).to(self.device)
         states_lstm = None
 
         # reset environment
         obs, info = self.env.reset()
-        obs = torch.Tensor(obs) # (batch_size, feature_dim)
+        obs = torch.Tensor(obs).to(self.device) # (batch_size, feature_dim)
 
         # iterate through a trial
         while not all(dones):
@@ -131,8 +144,8 @@ class BatchMaskA2C:
 
             # step the env
             obs, reward, done, truncated, info = self.env.step(action)
-            obs = torch.Tensor(obs) # (batch_size, feature_dim)
-            reward = torch.Tensor(reward) # (batch_size,)
+            obs = torch.Tensor(obs).to(self.device) # (batch_size, feature_dim)
+            reward = torch.Tensor(reward).to(self.device) # (batch_size,)
 
             # push results (make sure shapes are (batch_size,))
             buffer.push(
@@ -146,10 +159,10 @@ class BatchMaskA2C:
             # update mask and dones
             # note: the order of the following two lines is crucial
             dones = np.logical_or(dones, done)
-            mask = torch.Tensor(1 - dones) # keep 0 once a batch is done
+            mask = torch.Tensor(1 - dones).to(self.device) # keep 0 once a batch is done
 
         # process the last timestep
-        value = torch.zeros((self.batch_size,)) # zero padding for the last time step
+        value = torch.zeros((self.batch_size,)).to(self.device) # zero padding for the last time step
         buffer.push(values = value) # push value for the last time step
 
         # reformat rollout data into (batch_size, seq_len) and mask finished time steps
@@ -241,13 +254,13 @@ class BatchMaskA2C:
         seq_len = rewards.shape[1]
 
         # initialize recordings
-        returns = torch.zeros_like(rewards)
-        advantages = torch.zeros_like(rewards)
+        returns = torch.zeros_like(rewards).to(self.device)
+        advantages = torch.zeros_like(rewards).to(self.device)
 
         # compute returns and advantages from the last timestep
         # note: final R should always be 0, either by masking or zero padding
-        R = values[:, -1]
-        advantage = torch.zeros(self.batch_size)
+        R = values[:, -1].to(self.device)
+        advantage = torch.zeros(self.batch_size).to(self.device)
         
         for i in reversed(range(seq_len)):
             # get (v, r, v')

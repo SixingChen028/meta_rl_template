@@ -12,7 +12,7 @@ from torch.distributions import Categorical
 
 from environment import *
 from modules import *
-from trainer import *
+from trainer_batch import *
 
 if __name__ == '__main__':
 
@@ -34,6 +34,7 @@ if __name__ == '__main__':
     # training parameters
     parser.add_argument('--num_episodes', type = int, default = 30000, help = 'training episodes')
     parser.add_argument('--lr', type = float, default = 3e-4, help = 'learning rate')
+    parser.add_argument('--batch_size', type = int, default = 16, help = 'batch_size')
     parser.add_argument('--gamma', type = float, default = 0.9, help = 'temporal discount')
     parser.add_argument('--lamda', type = float, default = 1.0, help = 'generalized advantage estimation coefficient')
     parser.add_argument('--beta_v', type = float, default = 0.5, help = 'value loss coefficient')
@@ -43,23 +44,28 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
 
-    env = HarlowEnv(
-        flip_prob = args.flip_prob,
-    )
-    env = MetaLearningWrapper(env)
+    env = gym.vector.AsyncVectorEnv([
+        lambda: MetaLearningWrapper(
+            HarlowEnv(
+                flip_prob = args.flip_prob,
+            )
+        )
+        for _ in range(args.batch_size)
+    ])
 
     net = RecurrentActorCriticPolicy(
-        feature_dim = env.observation_space.shape[0],
-        action_dim = env.action_space.n,
+        feature_dim = env.single_observation_space.shape[0],
+        action_dim = env.single_action_space.n,
         lstm_hidden_dim = args.hidden_size,
         policy_hidden_dim = args.policy_hidden_size,
         value_hidden_dim = args.value_hidden_size,
     )
 
-    a2c = A2C(
+    a2c = BatchMaskA2C(
         net = net,
         env = env,
         lr = args.lr,
+        batch_size = args.batch_size,
         gamma = args.gamma,
         lamda = args.lamda,
         beta_v = args.beta_v,
