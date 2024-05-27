@@ -113,7 +113,7 @@ class BatchMaskA2C:
         buffer = BatchReplayBuffer()
                
         # initialize a trial
-        dones = np.zeros(self.batch_size, dtype = bool) # no reset ones turned to 1
+        dones = np.zeros(self.batch_size, dtype = bool) # no reset once turned to 1
         mask = torch.ones(self.batch_size)
         states_lstm = None
 
