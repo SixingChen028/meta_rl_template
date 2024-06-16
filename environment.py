@@ -1,4 +1,5 @@
 import numpy as np
+import random
 import time
 import os
 
@@ -31,10 +32,15 @@ class HarlowEnv(gym.Env):
         self.observation_space = Box(low = -np.inf, high = np.inf, shape = (1,))
 
 
-    def reset(self, seed = None, option = {}):
+    def reset(self):
         """
         Reset the environment.
         """
+
+        # set random seed (mainly for cluster)
+        seed = random.randint(0, 1000)
+        np.random.seed(seed)
+        random.seed(seed)
 
         # reset the environment
         self.num_completed = 0
