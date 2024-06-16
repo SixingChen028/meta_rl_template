@@ -196,6 +196,7 @@ class MetaLearningWrapper(Wrapper):
 
 
 if __name__ == '__main__':
+    # testing
     
     env = HarlowEnv()
     env = MetaLearningWrapper(env)

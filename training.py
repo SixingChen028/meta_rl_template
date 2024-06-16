@@ -11,8 +11,9 @@ import torch.nn.functional as F
 from torch.distributions import Categorical
 
 from environment import *
-from modules import *
-from trainer import *
+from networks import *
+from a2c import *
+
 
 if __name__ == '__main__':
 
@@ -56,7 +57,7 @@ if __name__ == '__main__':
         value_hidden_dim = args.value_hidden_size,
     )
 
-    a2c = A2C(
+    model = A2C(
         net = net,
         env = env,
         lr = args.lr,
@@ -67,11 +68,14 @@ if __name__ == '__main__':
         max_grad_norm = args.max_grad_norm,
     )
 
-    data = a2c.learn(num_episodes = args.num_episodes, print_frequency = 10)
+    data = model.learn(num_episodes = args.num_episodes, print_frequency = 10)
 
     # net_path = os.path.join(args.path, f"net_{args.jobid}.pth")
     # data_path = os.path.join(args.path, f"data_{args.jobid}.p")
 
+    # model.save_net(net_path)
+    # pickle.dump(data, open(data_path, 'wb'))
+
     plt.figure()
-    plt.plot(np.array(data['episode_reward']).reshape(200, -1).mean(axis = 1))
+    plt.plot(np.array(data['episode_reward']).reshape(100, -1).mean(axis = 1))
     plt.show()

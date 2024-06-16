@@ -9,6 +9,9 @@ from torch.distributions.categorical import Categorical
 
 
 class CategoricalMasked(Categorical):
+    """
+    A torch Categorical class with action masking.
+    """
 
     def __init__(self, logits, mask):
         self.mask = mask
