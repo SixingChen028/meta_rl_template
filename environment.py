@@ -17,17 +17,24 @@ class HarlowEnv(gym.Env):
 
     metadata = {'render_modes': ['human', 'rgb_array']}
 
-    def __init__(self, flip_prob = 0.2):
+    def __init__(
+            self,
+            num_trials = 20,
+            flip_prob = 0.2,
+            seed = None,
+        ):
+
         """
         Construct an environment.
         """
 
-        # max number of trials per episode
-        self.num_trials = 20
+        self.num_trials = num_trials # max number of trials per episode
+        self.flip_prob = flip_prob # flip probability
 
-        # flip probability
-        self.flip_prob = flip_prob
+        # set random seed
+        self.set_random_seed(seed)
 
+        # initialize action and observation spaces
         self.action_space = Discrete(3)
         self.observation_space = Box(low = -np.inf, high = np.inf, shape = (1,))
 
@@ -36,11 +43,6 @@ class HarlowEnv(gym.Env):
         """
         Reset the environment.
         """
-
-        # set random seed (mainly for cluster)
-        seed = random.randint(0, 1000)
-        np.random.seed(seed)
-        random.seed(seed)
 
         # reset the environment
         self.num_completed = 0
@@ -106,6 +108,16 @@ class HarlowEnv(gym.Env):
 
         if np.random.random() < self.flip_prob:
             self.correct_answer = 1 - self.correct_answer
+    
+
+    def set_random_seed(self, seed):
+        """
+        Set random seed.
+        """
+
+        if seed is not None:
+            np.random.seed(seed)
+            random.seed(seed)
 
     
     def one_hot_coding(self, num_classes, labels = None):

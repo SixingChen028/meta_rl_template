@@ -30,6 +30,7 @@ if __name__ == '__main__':
     parser.add_argument('--value_hidden_size', type = int, default = 32, help = 'value head hidden size')
 
     # environment parameters
+    parser.add_argument('--num_trials', type = int, default = 20, help = 'number of trials per episode')
     parser.add_argument('--flip_prob', type = float, default = 0.2, help = 'flip probability')
 
     # training parameters
@@ -43,12 +44,15 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-
+    # set environment
     env = HarlowEnv(
+        num_trials = args.num_trials,
         flip_prob = args.flip_prob,
+        seed = 0,
     )
     env = MetaLearningWrapper(env)
 
+    # set net
     net = RecurrentActorCriticPolicy(
         feature_dim = env.observation_space.shape[0],
         action_dim = env.action_space.n,
@@ -57,6 +61,7 @@ if __name__ == '__main__':
         value_hidden_dim = args.value_hidden_size,
     )
 
+    # set model
     model = A2C(
         net = net,
         env = env,
@@ -64,7 +69,7 @@ if __name__ == '__main__':
         gamma = args.gamma,
         lamda = args.lamda,
         beta_v = args.beta_v,
-        beta_e =args.beta_e,
+        beta_e = args.beta_e,
         max_grad_norm = args.max_grad_norm,
     )
 

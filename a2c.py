@@ -284,7 +284,7 @@ class A2C:
         torch.save(self.net, path)
 
 
-    def print_training_process(self, ep_num, time_elapsed, data, print_frequency = 2):
+    def print_training_process(self, ep_num, time_elapsed, data, print_frequency):
         """
         Print the training process.
         """

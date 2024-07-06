@@ -82,7 +82,7 @@ class ValueNet(nn.Module):
     
     def forward(self, x):
         features = self.value_extractor(x)
-        value = self.fc_value(features) # ([batch_size, 1])
+        value = self.fc_value(features) # (batch_size, 1)
 
         return value
 
@@ -109,10 +109,10 @@ class ActionNet(nn.Module):
         elif mask != None:
             dist = CategoricalMasked(logits = logits, mask = mask)
 
-        policy = dist.probs
-        action = dist.sample() # ([1])
-        log_prob = dist.log_prob(action) # ([1])
-        entropy = dist.entropy() # ([1])
+        policy = dist.probs # (batch_size, output_dim)
+        action = dist.sample() # (batch_size,)
+        log_prob = dist.log_prob(action) # (batch_size,)
+        entropy = dist.entropy() # (batch_size,)
         
         return action, policy, log_prob, entropy
 
@@ -239,21 +239,26 @@ class SharedRecurrentActorCriticPolicy(nn.Module):
 if __name__ == '__main__':
     # testing
 
-    # policy_net = RecurrentActorCriticPolicy(
-    #     feature_dim = 60,
-    #     action_dim = 2
-    # )
+    feature_dim = 60
+    action_dim = 3
+    batch_size = 16
 
-    policy_net = SharedRecurrentActorCriticPolicy(
-        feature_dim = 60,
-        action_dim = 2,
+    policy_net = RecurrentActorCriticPolicy(
+        feature_dim = feature_dim,
+        action_dim = action_dim,
     )
 
-    # Generate random test input
-    test_input = torch.randn((16, 60))
+    # policy_net = SharedRecurrentActorCriticPolicy(
+    #     feature_dim = feature_dim,
+    #     action_dim = action_dim,
+    # )
 
-    # Forward pass through the network
-    action, policy, log_prob, entropy, value, states_lstm = policy_net(test_input)
+    # generate random test input
+    test_input = torch.randn((batch_size, feature_dim))
+    test_mask = torch.randint(0, 2, size = (batch_size, action_dim), dtype = torch.bool)
+
+    # forward pass through the network
+    action, policy, log_prob, entropy, value, states_lstm = policy_net(test_input, mask = test_mask)
 
     print('action:', action)
     print('policy:', policy)
@@ -261,3 +266,4 @@ if __name__ == '__main__':
     print('entropy:', entropy)
     print('value:', value)
     print('lstm states:', states_lstm)
+
