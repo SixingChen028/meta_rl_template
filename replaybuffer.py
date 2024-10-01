@@ -46,40 +46,6 @@ class BaseReplayBuffer:
         pass
 
 
-class ReplayBuffer(BaseReplayBuffer):
-    """
-    A Replay Buffer.
-    """
-
-    def __init__(self):
-        """
-        Initialize the buffer.
-        """
-        super().__init__()
-
-
-    def reset(self):
-        """
-        Reset the rollout.
-        """
-        self.rollout = {
-            'log_probs': [],
-            'entropies': [],
-            'values': [],
-            'rewards': [],
-        }
-
-
-    def reformat(self):
-        """
-        Reformat rollout data.
-        """
-        self.rollout['log_probs'] = torch.cat(self.rollout['log_probs']) # (seq_len,)
-        self.rollout['entropies'] = torch.cat(self.rollout['entropies']) # (seq_len,)
-        self.rollout['values'] = torch.cat(self.rollout['values']) # (seq_len + 1,)
-        self.rollout['rewards'] = torch.Tensor(self.rollout['rewards']) # (seq_len,)
-
-
 class BatchReplayBuffer(BaseReplayBuffer):
     """
     A Replay Buffer.

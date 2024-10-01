@@ -1,13 +1,9 @@
 import numpy as np
 import random
-import time
-import os
 
 import gymnasium as gym
 from gymnasium import Wrapper 
-from gymnasium.spaces import Box, Discrete, MultiDiscrete
-
-from sb3_contrib import RecurrentPPO
+from gymnasium.spaces import Box, Discrete
 
 
 class HarlowEnv(gym.Env):
@@ -52,6 +48,7 @@ class HarlowEnv(gym.Env):
         obs = np.array([1.])
         info = {
             'correct_answer': self.correct_answer,
+            'mask': self.get_action_mask(),
         }
 
         return obs, info
@@ -91,11 +88,12 @@ class HarlowEnv(gym.Env):
             
             obs = np.array([1.])
         
-        if self.num_completed >= self.num_trials + np.random.randint(0, 10, 1): # test for different episode length
+        if self.num_completed >= self.num_trials:
             done = True
         
         info = {
             'correct_answer': self.correct_answer,
+            'mask': self.get_action_mask(),
         }
 
         return obs, reward, done, False, info
@@ -108,6 +106,21 @@ class HarlowEnv(gym.Env):
 
         if np.random.random() < self.flip_prob:
             self.correct_answer = 1 - self.correct_answer
+
+
+    def get_action_mask(self):
+        """
+        Get action mask.
+
+        Note:
+            no batching is considered here. batching is implemented by vectorzation wrapper.
+            if no batch training is used, add the batch dimension and transfer the mask to torch.tensor in trainer.
+            if batch training is used, concatenate batches and transfer the mask to torch.tensor in trainer.
+        """
+
+        mask = np.ones((self.action_space.n,), dtype = bool)
+
+        return mask
     
 
     def set_random_seed(self, seed):

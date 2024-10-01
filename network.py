@@ -1,10 +1,5 @@
-import numpy as np
-import matplotlib.pyplot as plt
-
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-from torch.distributions import Normal
 from torch.distributions.categorical import Categorical
 
 
@@ -32,7 +27,7 @@ class CategoricalMasked(Categorical):
         
         p_log_p = self.logits * self.probs
 
-        # Compute the entropy with possible action only
+        # compute the entropy with possible action only
         p_log_p = torch.where(
             self.mask,
             p_log_p,
@@ -117,7 +112,7 @@ class ActionNet(nn.Module):
         return action, policy, log_prob, entropy
 
 
-class RecurrentActorCriticPolicy(nn.Module):
+class LSTMRecurrentActorCriticPolicy(nn.Module):
     """
     Recurrent actor-critic policy.
     """
@@ -130,7 +125,7 @@ class RecurrentActorCriticPolicy(nn.Module):
             policy_hidden_dim = 32,
             value_hidden_dim = 32,
         ):
-        super(RecurrentActorCriticPolicy, self).__init__()
+        super(LSTMRecurrentActorCriticPolicy, self).__init__()
 
         # network parameters
         self.feature_dim = feature_dim
@@ -179,7 +174,7 @@ class RecurrentActorCriticPolicy(nn.Module):
         return action, policy, log_prob, entropy, value, [(hidden_actor, cell_actor), (hidden_critic, cell_critic)]
 
 
-class SharedRecurrentActorCriticPolicy(nn.Module):
+class SharedLSTMRecurrentActorCriticPolicy(nn.Module):
     """
     Recurrent actor-critic policy with shared actor and critic.
     """
@@ -192,7 +187,7 @@ class SharedRecurrentActorCriticPolicy(nn.Module):
             policy_hidden_dim = 32,
             value_hidden_dim = 32,
         ):
-        super(SharedRecurrentActorCriticPolicy, self).__init__()
+        super(SharedLSTMRecurrentActorCriticPolicy, self).__init__()
 
         # network parameters
         self.feature_dim = feature_dim
@@ -234,6 +229,125 @@ class SharedRecurrentActorCriticPolicy(nn.Module):
         value = self.value_net(hidden)
 
         return action, policy, log_prob, entropy, value, (hidden, cell)
+    
+
+class GRURecurrentActorCriticPolicy(nn.Module):
+    """
+    GRU recurrent actor-critic policy.
+    """
+
+    def __init__(
+            self,
+            feature_dim,
+            action_dim,
+            gru_hidden_dim = 128,
+            policy_hidden_dim = 32,
+            value_hidden_dim = 32,
+        ):
+        super(GRURecurrentActorCriticPolicy, self).__init__()
+
+        # network parameters
+        self.feature_dim = feature_dim
+        self.action_dim = action_dim
+        self.gru_hidden_dim = gru_hidden_dim
+        self.policy_hidden_dim = policy_hidden_dim
+        self.value_hidden_dim = value_hidden_dim
+
+        # input feature extractor
+        self.features_extractor = FlattenExtractor()
+        
+        # recurrent neural network
+        self.gru_actor = nn.GRUCell(feature_dim, gru_hidden_dim)
+        self.gru_critic = nn.GRUCell(feature_dim, gru_hidden_dim)
+
+        # policy and value net
+        self.policy_net = ActionNet(gru_hidden_dim, policy_hidden_dim, action_dim)
+        self.value_net = ValueNet(gru_hidden_dim, value_hidden_dim)
+
+
+    def forward(self, obs, states_gru = None, mask = None):
+        """
+        Forward the net.
+        """
+
+        # extract input features
+        features = self.features_extractor(obs)
+
+        # initialize hidden states
+        if states_gru is None:
+            states_actor = torch.zeros(features.size(0), self.gru_actor.hidden_size, device = obs.device)
+            states_critic = torch.zeros(features.size(0), self.gru_critic.hidden_size, device = obs.device)
+        else:
+            states_actor, states_critic = states_gru
+
+        # iterate one step
+        hidden_actor = self.gru_actor(features, states_actor)
+        hidden_critic = self.gru_critic(features, states_critic)
+
+        # compute action
+        action, policy, log_prob, entropy = self.policy_net(hidden_actor, mask)
+
+        # compute value
+        value = self.value_net(hidden_critic)
+
+        return action, policy, log_prob, entropy, value, [hidden_actor, hidden_critic]
+
+
+class SharedGRURecurrentActorCriticPolicy(nn.Module):
+    """
+    GRU recurrent actor-critic policy with shared actor and critic.
+    """
+
+    def __init__(
+            self,
+            feature_dim,
+            action_dim,
+            gru_hidden_dim = 128,
+            policy_hidden_dim = 32,
+            value_hidden_dim = 32,
+        ):
+        super(SharedGRURecurrentActorCriticPolicy, self).__init__()
+
+        # network parameters
+        self.feature_dim = feature_dim
+        self.action_dim = action_dim
+        self.gru_hidden_dim = gru_hidden_dim
+        self.policy_hidden_dim = policy_hidden_dim
+        self.value_hidden_dim = value_hidden_dim
+
+        # input feature extractor
+        self.features_extractor = FlattenExtractor()
+        
+        # recurrent neural network
+        self.gru = nn.GRUCell(feature_dim, gru_hidden_dim)
+
+        # policy and value net
+        self.policy_net = ActionNet(gru_hidden_dim, policy_hidden_dim, action_dim)
+        self.value_net = ValueNet(gru_hidden_dim, value_hidden_dim)
+
+
+    def forward(self, obs, states_gru = None, mask = None):
+        """
+        Forward the net.
+        """
+
+        # extract input features
+        features = self.features_extractor(obs)
+
+        # initialize hidden states
+        if states_gru is None:
+            states_gru = torch.zeros(features.size(0), self.gru.hidden_size, device = obs.device)
+        
+        # iterate one step
+        hidden = self.gru(features, states_gru)
+
+        # compute action
+        action, policy, log_prob, entropy = self.policy_net(hidden, mask)
+
+        # compute value
+        value = self.value_net(hidden)
+
+        return action, policy, log_prob, entropy, value, hidden
 
 
 if __name__ == '__main__':
@@ -243,12 +357,12 @@ if __name__ == '__main__':
     action_dim = 3
     batch_size = 16
 
-    policy_net = RecurrentActorCriticPolicy(
+    net = LSTMRecurrentActorCriticPolicy(
         feature_dim = feature_dim,
         action_dim = action_dim,
     )
 
-    # policy_net = SharedRecurrentActorCriticPolicy(
+    # net = SharedLSTMRecurrentActorCriticPolicy(
     #     feature_dim = feature_dim,
     #     action_dim = action_dim,
     # )
@@ -258,7 +372,7 @@ if __name__ == '__main__':
     test_mask = torch.randint(0, 2, size = (batch_size, action_dim), dtype = torch.bool)
 
     # forward pass through the network
-    action, policy, log_prob, entropy, value, states_lstm = policy_net(test_input, mask = test_mask)
+    action, policy, log_prob, entropy, value, states_lstm = net(test_input, mask = test_mask)
 
     print('action:', action)
     print('policy:', policy)

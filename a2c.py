@@ -1,17 +1,15 @@
-import numpy as np
+import os
 import time
-
-import gymnasium as gym
-
+import numpy as np
+import pickle
 import torch
-from torch import nn
 import torch.nn.functional as F
-from torch.distributions import Categorical
+import gymnasium as gym
 
 from replaybuffer import *
 
 
-class A2C:
+class BatchMaskA2C:
     """
     An A2C trainer.
     """
@@ -21,6 +19,7 @@ class A2C:
             net,
             env,
             lr,
+            batch_size,
             gamma,
             lamda,
             beta_v,
@@ -36,6 +35,7 @@ class A2C:
         self.net = net
         self.env = env
         self.lr = lr
+        self.batch_size = batch_size
         self.gamma = gamma
         self.lamda = lamda
         self.beta_v = beta_v
@@ -53,29 +53,31 @@ class A2C:
 
         Args:
             buffer: a ReplayBuffer object. rollout includes:
-                rewards: a torch.Tensor with shape (seq_len,).
-                values: a torch.Tensor with shape (seq_len + 1,).
-                log_probs: a torch.Tensor with shape (seq_len,).
-                entropies: a torch.Tensor with shape (seq_len,).
+                masks: a torch.Tensor with shape (batch_size, seq_len).
+                    track ongoing batches. 1 for ongoing time steps and 0 for padding time steps.
+                rewards: a torch.Tensor with shape (batch_size, seq_len).
+                values: a torch.Tensor with shape (batch_size, seq_len + 1).
+                log_probs: a torch.Tensor with shape (batch_size, seq_len).
+                entropies: a torch.Tensor with shape (batch_size, seq_len).
 
         Returns:
             losses_episode: a dictionary. losses for the episode.
         """
 
         # pull data from buffer
-        rewards, values, log_probs, entropies = buffer.pull('rewards', 'values', 'log_probs', 'entropies')
+        masks, rewards, values, log_probs, entropies = buffer.pull('masks', 'rewards', 'values', 'log_probs', 'entropies')
 
         # compute returns and advantages
-        returns, advantages = self.get_discounted_returns(rewards, values)  # (seq_len,)
+        returns, advantages = self.get_discounted_returns(rewards, values) # (batch_size, seq_len)
 
         # compute policy loss
-        policy_loss = -(log_probs * advantages.detach()).sum() # (1,)
+        policy_loss = -(log_probs * advantages.detach() * masks).sum(axis = 1).mean(axis = 0) # (1,)
 
         # compute value loss
-        value_loss = F.mse_loss(values[:-1], returns, reduction = 'sum') # (1,)
+        value_loss = (F.mse_loss(values[:, :-1], returns, reduction = 'none') * masks).sum(axis = 1).mean(axis = 0) # (1,)
 
         # compute entropy loss
-        entropy_loss = -entropies.sum() # (1,)
+        entropy_loss = -(entropies * masks).sum(axis = 1).mean(axis = 0) # (1,)
 
         # compute loss
         loss = (
@@ -111,49 +113,59 @@ class A2C:
         """
 
         # initialize replay buffer
-        buffer = ReplayBuffer()
-                
+        buffer = BatchReplayBuffer()
+               
         # initialize a trial
-        done = False
-        states_lstm = None
+        dones = np.zeros(self.batch_size, dtype = bool) # no reset once turned to 1
+        mask = torch.ones(self.batch_size)
+        states_hidden = None
 
         # reset environment
         obs, info = self.env.reset()
-        obs = torch.Tensor(obs).unsqueeze(dim = 0) # (1, feature_dim)
+        obs = torch.Tensor(obs) # (batch_size, feature_dim)
+        action_mask = torch.tensor(np.stack(info['mask'])) # (batch_size, action_dim), bool
 
         # iterate through a trial
-        while not done:
+        while not all(dones):
             # step the net
-            action, policy, log_prob, entropy, value, states_lstm = self.net(
-                obs, states_lstm
+            action, policy, log_prob, entropy, value, states_hidden = self.net(
+                obs, states_hidden, action_mask,
             )
-            value = value.view(-1) # (1,)
+            value = value.view(-1) # (batch_size,)
 
             # step the env
-            obs, reward, done, truncated, info = self.env.step(action.item())
-            obs = torch.Tensor(obs).unsqueeze(dim = 0) # (1, feature_dim)
+            obs, reward, done, truncated, info = self.env.step(action)
+            obs = torch.Tensor(obs) # (batch_size, feature_dim)
+            reward = torch.Tensor(reward) # (batch_size,)
+            action_mask = torch.tensor(np.stack(info['mask'])) # (batch_size, action_dim), bool
 
-            # push results
+            # push results (make sure shapes are (batch_size,))
             buffer.push(
-                log_probs = log_prob,
-                entropies = entropy,
-                values = value,
-                rewards = reward
+                masks = mask, # (batch_size,)
+                log_probs = log_prob, # (batch_size,)
+                entropies = entropy, # (batch_size,)
+                values = value, # (batch_size,)
+                rewards = reward, # (batch_size,)
             )
 
+            # update mask and dones
+            # note: the order of the following two lines is crucial
+            dones = np.logical_or(dones, done)
+            mask = (1 - torch.Tensor(dones)) # keep 0 once a batch is done
+
         # process the last timestep
-        value = torch.zeros((1,)) # zero padding for the last time step
+        value = torch.zeros((self.batch_size,)) # zero padding for the last time step
         buffer.push(values = value) # push value for the last time step
 
-        # reformat rollout data into (seq_len,)
+        # reformat rollout data into (batch_size, seq_len) and mask finished time steps
         buffer.reformat()
 
         # update model
         losses_episode = self.update_model(buffer)
 
-        # compute reward and length of an epiosde
-        episode_reward = buffer.rollout['rewards'].sum()
-        episode_length = len(buffer.rollout['rewards'])
+        # compute reward and length of the epiosde
+        episode_length = buffer.rollout['masks'].sum(axis = 1).mean(axis = 0)
+        episode_reward = (buffer.rollout['rewards'] * buffer.rollout['masks']).sum(axis = 1).mean(axis = 0)
 
         # wrap training data for the episode
         data_episode = losses_episode.copy()
@@ -165,20 +177,28 @@ class A2C:
         return data_episode
 
 
-    def learn(self, num_episodes, print_frequency = 2):
+    def learn(
+            self,
+            num_episodes,
+            print_frequency = None,
+            checkpoint_frequency = None,
+            checkpoint_path = None,
+        ):
         """
         Train the model.
 
         Args:
             num_episodes: an integer.
-            print_frequency: an integer. training data.
+            print_frequency: an integer.
+            checkpoint_frequency: an integer.
+            checkpoint_path: a string.
 
         Returns:
-            data: a dictionary.
+            data: a dictionary. training data.
         """
 
         # initialize recordings
-        data = {
+        self.data = {
             'loss': [],
             'policy_loss': [],
             'value_loss': [],
@@ -187,33 +207,40 @@ class A2C:
             'episode_reward': [],
         }
 
+        # compute number of batches
+        num_batch = int(num_episodes / self.batch_size)
+
         # train the model
         start_time = time.time()
-        for episode in range(num_episodes):
+        for batch in range(num_batch):
             # train one episode
             data_episode = self.train_one_episode()
         
             # record training data
-            for key, item in data.items():
-                data[key].append(data_episode[key])
+            for key, item in self.data.items():
+                self.data[key].append(data_episode[key])
 
             # print the training process
-            self.print_training_process(
-                ep_num = episode + 1,
-                time_elapsed = time.time() - start_time,
-                data = data_episode,
-                print_frequency = print_frequency
-            )
+            if print_frequency is not None and (batch + 1) % print_frequency == 0:
+                self.print_training_process(
+                    batch_num = batch + 1,
+                    time_elapsed = time.time() - start_time,
+                    data = data_episode
+                )
+            
+            # save check point
+            if checkpoint_frequency is not None and (batch + 1) % checkpoint_frequency == 0:
+                self.save_net(os.path.join(checkpoint_path, f'net_{batch + 1}.pth'))
 
             # update learning rate
             if self.lr_schedule is not None:
-                self.update_learning_rate(episode)
+                self.update_learning_rate(batch)
 
             # update entropy regularization
             if self.entropy_schedule is not None:
-                self.update_entropy_coef(episode)
+                self.update_entropy_coef(batch)
         
-        return data
+        return self.data
     
 
     def get_discounted_returns(self, rewards, values):
@@ -221,36 +248,41 @@ class A2C:
         Compute discounted reterns and advantages.
 
         Args:
-            rewards: a torch.Tensor with shape (seq_len,).
-            values: a torch.Tensor with shape (seq_len + 1,).
+            rewards: a torch.Tensor with shape (batch_size, seq_len).
+            values: a torch.Tensor with shape (batch_size, seq_len + 1).
+                note: finished time steps in rewards and values should already be masked.
 
         Returns:
-            returns: a torch.Tensor with shape (seq_len,).
-            advantages: a torch.Tensor with shape (seq_len,).
+            returns: a torch.Tensor with shape (batch_size, seq_len).
+            advantages: a torch.Tensor with shape (batch_size, seq_len).
         """
+
+        # get sequence length (max sequence length among batches)
+        seq_len = rewards.shape[1]
 
         # initialize recordings
         returns = torch.zeros_like(rewards)
         advantages = torch.zeros_like(rewards)
 
         # compute returns and advantages from the last timestep
-        R = values[-1] # should be 0
-        advantage = 0
+        # note: final R should always be 0, either by masking or zero padding
+        R = values[:, -1]
+        advantage = torch.zeros(self.batch_size)
         
-        for i in reversed(range(len(rewards))):
+        for i in reversed(range(seq_len)):
             # get (v, r, v')
-            r = rewards[i]
-            v = values[i]
-            v_next = values[i + 1]
+            r = rewards[:, i]
+            v = values[:, i]
+            v_next = values[:, i + 1]
 
             # compute return for the timestep
             R = r + R * self.gamma
-            returns[i] = R
+            returns[:, i] = R
 
             # compute advantage for the timestep
             delta = r + v_next * self.gamma - v
             advantage = delta + advantage * self.gamma * self.lamda
-            advantages[i] = advantage
+            advantages[:, i] = advantage
             
         return returns, advantages
     
@@ -283,67 +315,35 @@ class A2C:
         
         torch.save(self.net, path)
 
+    
+    def save_data(self, path):
+        """
+        Save the data given the whole path.
+        """
+        
+        pickle.dump(self.data, open(path, 'wb'))
 
-    def print_training_process(self, ep_num, time_elapsed, data, print_frequency):
+
+    def print_training_process(self, batch_num, time_elapsed, data):
         """
         Print the training process.
         """
 
-        if ep_num % print_frequency == 0:
-            print("-------------------------------------------")
-            print("| rollout/                |               |")
-            print(f"|    ep_len_mean          | {data['episode_length']:<13.1f} |")
-            print(f"|    ep_rew_mean          | {data['episode_reward']:<13.5f} |")
-            print("| time/                   |               |")
-            print(f"|    ep_num               | {ep_num:<13} |")
-            print(f"|    time_elapsed         | {time_elapsed:<13.4f} |")
-            print("| train/                  |               |")
-            print(f"|    learning_rate        | {self.lr:<13.5f} |")
-            print(f"|    loss                 | {data['loss']:<13.4f} |")
-            print(f"|    policy_loss          | {data['policy_loss']:<13.4f} |")
-            print(f"|    value_loss           | {data['value_loss']:<13.4f} |")
-            print(f"|    entropy_loss         | {data['entropy_loss']:<13.4f} |")
-            print("-------------------------------------------")
+        ep_num = batch_num * self.batch_size
+        print("-------------------------------------------")
+        print("| rollout/                |               |")
+        print(f"|    ep_len_mean          | {data['episode_length']:<13.1f} |")
+        print(f"|    ep_rew_mean          | {data['episode_reward']:<13.5f} |")
+        print("| time/                   |               |")
+        print(f"|    ep_num               | {ep_num:<13} |")
+        print(f"|    batch_num            | {batch_num:<13} |")
+        print(f"|    time_elapsed         | {time_elapsed:<13.4f} |")
+        print("| train/                  |               |")
+        print(f"|    learning_rate        | {self.lr:<13.5f} |")
+        print(f"|    loss                 | {data['loss']:<13.4f} |")
+        print(f"|    policy_loss          | {data['policy_loss']:<13.4f} |")
+        print(f"|    value_loss           | {data['value_loss']:<13.4f} |")
+        print(f"|    entropy_loss         | {data['entropy_loss']:<13.4f} |")
+        print("-------------------------------------------")
 
 
-
-
-
-if __name__ == '__main__':
-    # testing
-
-    from environment import *
-    from networks import *
-    from a2c import *
-
-    env = HarlowEnv()
-    env = MetaLearningWrapper(env)
-
-    net = RecurrentActorCriticPolicy(
-        feature_dim = env.observation_space.shape[0],
-        action_dim = env.action_space.n,
-        lstm_hidden_dim = 128,
-        policy_hidden_dim = 32,
-        value_hidden_dim = 32,
-    )
-
-    a2c = A2C(
-        net = net,
-        env = env,
-        lr = 3e-4,
-        gamma = 0.9,
-        lamda = 1.,
-        beta_v = 0.05,
-        beta_e = 0.05,
-        max_grad_norm = 1.,
-    )
-
-    data = a2c.learn(num_episodes = 10000)
-
-    plt.figure()
-    plt.plot(np.array(data['episode_reward']).reshape(200, -1).mean(axis = 1))
-    plt.show()
-
-    plt.figure()
-    plt.plot(np.array(data['value_loss']).reshape(200, -1).mean(axis = 1))
-    plt.show()
