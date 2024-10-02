@@ -27,7 +27,7 @@ class CategoricalMasked(Categorical):
         
         p_log_p = self.logits * self.probs
 
-        # compute the entropy with possible action only
+        # compute entropy with possible actions only
         p_log_p = torch.where(
             self.mask,
             p_log_p,
@@ -46,38 +46,17 @@ class FlattenExtractor(nn.Module):
         return x.view(x.size(0), -1)
 
 
-class MlpExtractor(nn.Module):
-    """
-    A MLP feture extractor.
-    """
-
-    def __init__(self, input_dim, output_dim):
-        super(MlpExtractor, self).__init__()
-        self.decoder = nn.Sequential(
-            nn.Linear(input_dim, output_dim),
-            nn.Tanh(),
-            nn.Linear(output_dim, output_dim),
-            nn.Tanh()
-        )
-
-    def forward(self, x):
-        features = self.decoder(x)
-        return features
-
-
 class ValueNet(nn.Module):
     """
     Value baseline network.
     """
     
-    def __init__(self, input_dim, hidden_dim):
+    def __init__(self, input_dim):
         super(ValueNet, self).__init__()
-        self.value_extractor = MlpExtractor(input_dim, hidden_dim)
-        self.fc_value = nn.Linear(hidden_dim, 1)
+        self.fc_value = nn.Linear(input_dim, 1)
     
     def forward(self, x):
-        features = self.value_extractor(x)
-        value = self.fc_value(features) # (batch_size, 1)
+        value = self.fc_value(x) # (batch_size, 1)
 
         return value
 
@@ -87,23 +66,21 @@ class ActionNet(nn.Module):
     Action network.
     """
 
-    def __init__(self, input_dim, hidden_dim, output_dim):
+    def __init__(self, input_dim, output_dim):
         super(ActionNet, self).__init__()
-        self.action_extractor = MlpExtractor(input_dim, hidden_dim)
-        self.fc_action = nn.Linear(hidden_dim, output_dim)
+        self.fc_action = nn.Linear(input_dim, output_dim)
     
     def forward(self, x, mask = None):
-        features = self.action_extractor(x)
-        logits = self.fc_action(features)
+        self.logits = self.fc_action(x) # record logits for later analyses
 
         # no action masking
         if mask == None:
-            dist = Categorical(logits = logits)
+            dist = Categorical(logits = self.logits)
         
         # with action masking
         elif mask != None:
-            dist = CategoricalMasked(logits = logits, mask = mask)
-
+            dist = CategoricalMasked(logits = self.logits, mask = mask)
+        
         policy = dist.probs # (batch_size, output_dim)
         action = dist.sample() # (batch_size,)
         log_prob = dist.log_prob(action) # (batch_size,)
@@ -114,7 +91,7 @@ class ActionNet(nn.Module):
 
 class LSTMRecurrentActorCriticPolicy(nn.Module):
     """
-    Recurrent actor-critic policy.
+    LSTM recurrent actor-critic policy.
     """
 
     def __init__(
@@ -122,8 +99,6 @@ class LSTMRecurrentActorCriticPolicy(nn.Module):
             feature_dim,
             action_dim,
             lstm_hidden_dim = 128,
-            policy_hidden_dim = 32,
-            value_hidden_dim = 32,
         ):
         super(LSTMRecurrentActorCriticPolicy, self).__init__()
 
@@ -131,8 +106,6 @@ class LSTMRecurrentActorCriticPolicy(nn.Module):
         self.feature_dim = feature_dim
         self.action_dim = action_dim
         self.lstm_hidden_dim = lstm_hidden_dim
-        self.policy_hidden_dim = policy_hidden_dim
-        self.value_hidden_dim = value_hidden_dim
 
         # input feature extractor
         self.features_extractor = FlattenExtractor()
@@ -142,8 +115,8 @@ class LSTMRecurrentActorCriticPolicy(nn.Module):
         self.lstm_critic = nn.LSTMCell(feature_dim, lstm_hidden_dim)
 
         # policy and value net
-        self.policy_net = ActionNet(lstm_hidden_dim, policy_hidden_dim, action_dim)
-        self.value_net = ValueNet(lstm_hidden_dim, value_hidden_dim)
+        self.policy_net = ActionNet(lstm_hidden_dim, action_dim)
+        self.value_net = ValueNet(lstm_hidden_dim)
 
 
     def forward(self, obs, states_lstm = None, mask = None):
@@ -176,7 +149,7 @@ class LSTMRecurrentActorCriticPolicy(nn.Module):
 
 class SharedLSTMRecurrentActorCriticPolicy(nn.Module):
     """
-    Recurrent actor-critic policy with shared actor and critic.
+    LSTM recurrent actor-critic policy with shared actor and critic.
     """
 
     def __init__(
@@ -184,8 +157,6 @@ class SharedLSTMRecurrentActorCriticPolicy(nn.Module):
             feature_dim,
             action_dim,
             lstm_hidden_dim = 128,
-            policy_hidden_dim = 32,
-            value_hidden_dim = 32,
         ):
         super(SharedLSTMRecurrentActorCriticPolicy, self).__init__()
 
@@ -193,8 +164,6 @@ class SharedLSTMRecurrentActorCriticPolicy(nn.Module):
         self.feature_dim = feature_dim
         self.action_dim = action_dim
         self.lstm_hidden_dim = lstm_hidden_dim
-        self.policy_hidden_dim = policy_hidden_dim
-        self.value_hidden_dim = value_hidden_dim
 
         # input feature extractor
         self.features_extractor = FlattenExtractor()
@@ -203,8 +172,8 @@ class SharedLSTMRecurrentActorCriticPolicy(nn.Module):
         self.lstm = nn.LSTMCell(feature_dim, lstm_hidden_dim)
 
         # policy and value net
-        self.policy_net = ActionNet(lstm_hidden_dim, policy_hidden_dim, action_dim)
-        self.value_net = ValueNet(lstm_hidden_dim, value_hidden_dim)
+        self.policy_net = ActionNet(lstm_hidden_dim, action_dim)
+        self.value_net = ValueNet(lstm_hidden_dim)
 
 
     def forward(self, obs, states_lstm = None, mask = None):
@@ -229,7 +198,7 @@ class SharedLSTMRecurrentActorCriticPolicy(nn.Module):
         value = self.value_net(hidden)
 
         return action, policy, log_prob, entropy, value, (hidden, cell)
-    
+
 
 class GRURecurrentActorCriticPolicy(nn.Module):
     """
@@ -241,8 +210,6 @@ class GRURecurrentActorCriticPolicy(nn.Module):
             feature_dim,
             action_dim,
             gru_hidden_dim = 128,
-            policy_hidden_dim = 32,
-            value_hidden_dim = 32,
         ):
         super(GRURecurrentActorCriticPolicy, self).__init__()
 
@@ -250,8 +217,6 @@ class GRURecurrentActorCriticPolicy(nn.Module):
         self.feature_dim = feature_dim
         self.action_dim = action_dim
         self.gru_hidden_dim = gru_hidden_dim
-        self.policy_hidden_dim = policy_hidden_dim
-        self.value_hidden_dim = value_hidden_dim
 
         # input feature extractor
         self.features_extractor = FlattenExtractor()
@@ -261,8 +226,8 @@ class GRURecurrentActorCriticPolicy(nn.Module):
         self.gru_critic = nn.GRUCell(feature_dim, gru_hidden_dim)
 
         # policy and value net
-        self.policy_net = ActionNet(gru_hidden_dim, policy_hidden_dim, action_dim)
-        self.value_net = ValueNet(gru_hidden_dim, value_hidden_dim)
+        self.policy_net = ActionNet(gru_hidden_dim, action_dim)
+        self.value_net = ValueNet(gru_hidden_dim)
 
 
     def forward(self, obs, states_gru = None, mask = None):
@@ -303,8 +268,6 @@ class SharedGRURecurrentActorCriticPolicy(nn.Module):
             feature_dim,
             action_dim,
             gru_hidden_dim = 128,
-            policy_hidden_dim = 32,
-            value_hidden_dim = 32,
         ):
         super(SharedGRURecurrentActorCriticPolicy, self).__init__()
 
@@ -312,8 +275,6 @@ class SharedGRURecurrentActorCriticPolicy(nn.Module):
         self.feature_dim = feature_dim
         self.action_dim = action_dim
         self.gru_hidden_dim = gru_hidden_dim
-        self.policy_hidden_dim = policy_hidden_dim
-        self.value_hidden_dim = value_hidden_dim
 
         # input feature extractor
         self.features_extractor = FlattenExtractor()
@@ -322,8 +283,8 @@ class SharedGRURecurrentActorCriticPolicy(nn.Module):
         self.gru = nn.GRUCell(feature_dim, gru_hidden_dim)
 
         # policy and value net
-        self.policy_net = ActionNet(gru_hidden_dim, policy_hidden_dim, action_dim)
-        self.value_net = ValueNet(gru_hidden_dim, value_hidden_dim)
+        self.policy_net = ActionNet(gru_hidden_dim, action_dim)
+        self.value_net = ValueNet(gru_hidden_dim)
 
 
     def forward(self, obs, states_gru = None, mask = None):
@@ -350,6 +311,7 @@ class SharedGRURecurrentActorCriticPolicy(nn.Module):
         return action, policy, log_prob, entropy, value, hidden
 
 
+
 if __name__ == '__main__':
     # testing
 
@@ -357,12 +319,23 @@ if __name__ == '__main__':
     action_dim = 3
     batch_size = 16
 
+
     net = LSTMRecurrentActorCriticPolicy(
         feature_dim = feature_dim,
         action_dim = action_dim,
     )
 
     # net = SharedLSTMRecurrentActorCriticPolicy(
+    #     feature_dim = feature_dim,
+    #     action_dim = action_dim,
+    # )
+
+    # net = GRURecurrentActorCriticPolicy(
+    #     feature_dim = feature_dim,
+    #     action_dim = action_dim,
+    # )
+
+    # net = SharedGRURecurrentActorCriticPolicy(
     #     feature_dim = feature_dim,
     #     action_dim = action_dim,
     # )
@@ -380,4 +353,3 @@ if __name__ == '__main__':
     print('entropy:', entropy)
     print('value:', value)
     print('lstm states:', states_lstm)
-

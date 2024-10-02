@@ -20,21 +20,19 @@ if __name__ == '__main__':
     parser.add_argument('--path', type = str, default = os.path.join(os.getcwd(), 'results'), help = 'path to store results')
 
     # nework parameters
-    parser.add_argument('--hidden_size', type = int, default = 128, help = 'lstm hidden size')
-    parser.add_argument('--policy_hidden_size', type = int, default = 32, help = 'policy head hidden size')
-    parser.add_argument('--value_hidden_size', type = int, default = 32, help = 'value head hidden size')
+    parser.add_argument('--hidden_size', type = int, default = 32, help = 'lstm hidden size')
 
     # environment parameters
     parser.add_argument('--num_trials', type = int, default = 20, help = 'number of trials per episode')
     parser.add_argument('--flip_prob', type = float, default = 0.2, help = 'flip probability')
 
     # training parameters
-    parser.add_argument('--num_episodes', type = int, default = 80000, help = 'training episodes')
-    parser.add_argument('--lr', type = float, default = 3e-4, help = 'learning rate')
+    parser.add_argument('--num_episodes', type = int, default = 40000, help = 'training episodes')
+    parser.add_argument('--lr', type = float, default = 1e-3, help = 'learning rate')
     parser.add_argument('--batch_size', type = int, default = 16, help = 'batch_size')
     parser.add_argument('--gamma', type = float, default = 0.9, help = 'temporal discount')
     parser.add_argument('--lamda', type = float, default = 1.0, help = 'generalized advantage estimation coefficient')
-    parser.add_argument('--beta_v', type = float, default = 0.5, help = 'value loss coefficient')
+    parser.add_argument('--beta_v', type = float, default = 0.1, help = 'value loss coefficient')
     parser.add_argument('--beta_e', type = float, default = 0.05, help = 'entropy regularization coefficient')
     parser.add_argument('--max_grad_norm', type = float, default = 1.0, help = 'gradient clipping')
 
@@ -63,8 +61,6 @@ if __name__ == '__main__':
         feature_dim = env.single_observation_space.shape[0],
         action_dim = env.single_action_space.n,
         lstm_hidden_dim = args.hidden_size,
-        policy_hidden_dim = args.policy_hidden_size,
-        value_hidden_dim = args.value_hidden_size,
     )
 
     # set model
