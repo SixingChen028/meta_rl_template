@@ -11,23 +11,21 @@ class CategoricalMasked(Categorical):
     def __init__(self, logits, mask):
         self.mask = mask
 
-        if mask is None:
-            super(CategoricalMasked, self).__init__(logits = logits)
-        else:
-            self.mask_value = torch.tensor(
-                torch.finfo(logits.dtype).min, dtype = logits.dtype
-            )
-            logits = torch.where(self.mask, logits, self.mask_value)
-            super(CategoricalMasked, self).__init__(logits = logits)
+        # set mask value to minimum possible value
+        self.mask_value = torch.tensor(
+            torch.finfo(logits.dtype).min, dtype = logits.dtype
+        )
+
+        # replace logits of invalid actions with the minimum value
+        logits = torch.where(self.mask, logits, self.mask_value)
+
+        super(CategoricalMasked, self).__init__(logits = logits)
 
 
     def entropy(self):
-        if self.mask is None:
-            return super().entropy()
-        
         p_log_p = self.logits * self.probs
 
-        # compute entropy with possible actions only
+        # compute entropy with possible actions only (not really necessary)
         p_log_p = torch.where(
             self.mask,
             p_log_p,
@@ -74,11 +72,11 @@ class ActionNet(nn.Module):
         self.logits = self.fc_action(x) # record logits for later analyses
 
         # no action masking
-        if mask == None:
+        if mask is None:
             dist = Categorical(logits = self.logits)
         
         # with action masking
-        elif mask != None:
+        elif mask is not None:
             dist = CategoricalMasked(logits = self.logits, mask = mask)
         
         policy = dist.probs # (batch_size, output_dim)

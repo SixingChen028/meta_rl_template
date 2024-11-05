@@ -61,7 +61,7 @@ class BatchMaskA2C:
                 entropies: a torch.Tensor with shape (batch_size, seq_len).
 
         Returns:
-            losses_episode: a dictionary. losses for the episode.
+            losses_batch: a dictionary. losses for the batch.
         """
 
         # pull data from buffer
@@ -93,23 +93,23 @@ class BatchMaskA2C:
             torch.nn.utils.clip_grad_norm_(self.net.parameters(), self.max_grad_norm)
         self.optimizer.step()
 
-        # wrap losses for the episode
-        losses_episode = {
+        # wrap losses for the batch
+        losses_batch = {
             'loss': loss.item(),
             'policy_loss': policy_loss.item(),
             'value_loss': value_loss.item(),
             'entropy_loss': entropy_loss.item(),
         }
 
-        return losses_episode
+        return losses_batch
     
 
-    def train_one_episode(self):
+    def train_one_batch(self):
         """
-        Train one episode.
+        Train one batch.
 
         Returns:
-            data_episode: a dictionary. training data for the episode.
+            data_batch: a dictionary. training data for the batch.
         """
 
         # initialize replay buffer
@@ -161,20 +161,20 @@ class BatchMaskA2C:
         buffer.reformat()
 
         # update model
-        losses_episode = self.update_model(buffer)
+        losses_batch = self.update_model(buffer)
 
         # compute reward and length of the epiosde
         episode_length = buffer.rollout['masks'].sum(axis = 1).mean(axis = 0)
         episode_reward = (buffer.rollout['rewards'] * buffer.rollout['masks']).sum(axis = 1).mean(axis = 0)
 
-        # wrap training data for the episode
-        data_episode = losses_episode.copy()
-        data_episode.update({
+        # wrap training data for the batch
+        data_batch = losses_batch.copy()
+        data_batch.update({
             'episode_reward': episode_reward,
             'episode_length': episode_length,
         })
 
-        return data_episode
+        return data_batch
 
 
     def learn(
@@ -208,24 +208,24 @@ class BatchMaskA2C:
         }
 
         # compute number of batches
-        num_batch = int(num_episodes / self.batch_size)
+        num_batches = int(num_episodes / self.batch_size)
 
         # train the model
         start_time = time.time()
-        for batch in range(num_batch):
-            # train one episode
-            data_episode = self.train_one_episode()
+        for batch in range(num_batches):
+            # train one batch
+            data_batch = self.train_one_batch()
         
             # record training data
             for key, item in self.data.items():
-                self.data[key].append(data_episode[key])
+                self.data[key].append(data_batch[key])
 
             # print the training process
             if print_frequency is not None and (batch + 1) % print_frequency == 0:
                 self.print_training_process(
                     batch_num = batch + 1,
                     time_elapsed = time.time() - start_time,
-                    data = data_episode
+                    data = data_batch
                 )
             
             # save check point
@@ -287,25 +287,25 @@ class BatchMaskA2C:
         return returns, advantages
     
 
-    def update_learning_rate(self, episode):
+    def update_learning_rate(self, batch):
         """
-        Update the learning rate based on the episode number.
+        Update the learning rate based on the batch number.
         """
 
-        if episode < len(self.lr_schedule):
-            self.lr = self.lr_schedule[episode]
+        if batch < len(self.lr_schedule):
+            self.lr = self.lr_schedule[batch]
 
             for param_group in self.optimizer.param_groups:
                 param_group['lr'] = self.lr
     
 
-    def update_entropy_coef(self, episode):
+    def update_entropy_coef(self, batch):
         """
-        Update the entropy regularization coefficient based on the episode number.
+        Update the entropy regularization coefficient based on the batch number.
         """
 
-        if episode < len(self.entropy_schedule):
-            self.beta_e = self.entropy_schedule[episode]
+        if batch < len(self.entropy_schedule):
+            self.beta_e = self.entropy_schedule[batch]
 
 
     def save_net(self, path):
