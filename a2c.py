@@ -118,7 +118,7 @@ class BatchMaskA2C:
         # initialize a trial
         dones = np.zeros(self.batch_size, dtype = bool) # no reset once turned to 1
         mask = torch.ones(self.batch_size)
-        states_hidden = None
+        states = None
 
         # reset environment
         obs, info = self.env.reset()
@@ -128,8 +128,8 @@ class BatchMaskA2C:
         # iterate through a trial
         while not all(dones):
             # step the net
-            action, policy, log_prob, entropy, value, states_hidden = self.net(
-                obs, states_hidden, action_mask,
+            action, policy, log_prob, entropy, value, states = self.net(
+                obs, states, action_mask,
             )
             value = value.view(-1) # (batch_size,)
 
@@ -179,7 +179,7 @@ class BatchMaskA2C:
 
     def learn(
             self,
-            num_episodes,
+            num_episode,
             print_frequency = None,
             checkpoint_frequency = None,
             checkpoint_path = None,
@@ -188,7 +188,7 @@ class BatchMaskA2C:
         Train the model.
 
         Args:
-            num_episodes: an integer.
+            num_episode: an integer.
             print_frequency: an integer.
             checkpoint_frequency: an integer.
             checkpoint_path: a string.
@@ -208,7 +208,7 @@ class BatchMaskA2C:
         }
 
         # compute number of batches
-        num_batches = int(num_episodes / self.batch_size)
+        num_batches = int(num_episode / self.batch_size)
 
         # train the model
         start_time = time.time()

@@ -27,7 +27,7 @@ if __name__ == '__main__':
     parser.add_argument('--flip_prob', type = float, default = 0.2, help = 'flip probability')
 
     # training parameters
-    parser.add_argument('--num_episodes', type = int, default = 40000, help = 'training episodes')
+    parser.add_argument('--num_episode', type = int, default = 40000, help = 'training episodes')
     parser.add_argument('--lr', type = float, default = 1e-3, help = 'learning rate')
     parser.add_argument('--batch_size', type = int, default = 16, help = 'batch_size')
     parser.add_argument('--gamma', type = float, default = 0.9, help = 'temporal discount')
@@ -58,9 +58,9 @@ if __name__ == '__main__':
 
     # set net
     net = LSTMRecurrentActorCriticPolicy(
-        feature_dim = env.single_observation_space.shape[0],
-        action_dim = env.single_action_space.n,
-        lstm_hidden_dim = args.hidden_size,
+        feature_size = env.single_observation_space.shape[0],
+        action_size = env.single_action_space.n,
+        hidden_size = args.hidden_size,
     )
 
     # set model
@@ -78,7 +78,7 @@ if __name__ == '__main__':
 
     # train network
     data = model.learn(
-        num_episodes = args.num_episodes,
+        num_episode = args.num_episode,
         print_frequency = 10
     )
 
