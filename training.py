@@ -27,7 +27,7 @@ if __name__ == '__main__':
     parser.add_argument('--flip_prob', type = float, default = 0.2, help = 'flip probability')
 
     # training parameters
-    parser.add_argument('--num_episode', type = int, default = 40000, help = 'training episodes')
+    parser.add_argument('--num_episodes', type = int, default = 40000, help = 'training episodes')
     parser.add_argument('--lr', type = float, default = 1e-3, help = 'learning rate')
     parser.add_argument('--batch_size', type = int, default = 16, help = 'batch_size')
     parser.add_argument('--gamma', type = float, default = 0.9, help = 'temporal discount')
@@ -78,7 +78,7 @@ if __name__ == '__main__':
 
     # train network
     data = model.learn(
-        num_episode = args.num_episode,
+        num_episodes = args.num_episodes,
         print_frequency = 10
     )
 

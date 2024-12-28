@@ -179,7 +179,7 @@ class BatchMaskA2C:
 
     def learn(
             self,
-            num_episode,
+            num_episodes,
             print_frequency = None,
             checkpoint_frequency = None,
             checkpoint_path = None,
@@ -188,7 +188,7 @@ class BatchMaskA2C:
         Train the model.
 
         Args:
-            num_episode: an integer.
+            num_episodes: an integer.
             print_frequency: an integer.
             checkpoint_frequency: an integer.
             checkpoint_path: a string.
@@ -208,7 +208,7 @@ class BatchMaskA2C:
         }
 
         # compute number of batches
-        num_batches = int(num_episode / self.batch_size)
+        num_batches = int(num_episodes / self.batch_size)
 
         # train the model
         start_time = time.time()
